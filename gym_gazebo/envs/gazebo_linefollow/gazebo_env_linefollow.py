@@ -42,6 +42,34 @@ class Gazebo_Linefollow_Env(gazebo_env.GazeboEnv):
         self.bridge = CvBridge()
         self.timeout = 0  # Used to keep track of images with no line detected
 
+    def find_path_center(self, frame, h, w):
+        gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        blur_frame = cv2.GaussianBlur(gray_frame, (17,17), 0)
+        ret, thresh_frame = cv2.threshold(blur_frame, 127, 255, cv2.THRESH_BINARY)
+        border_size = 10
+        padded_frame = cv2.copyMakeBorder(thresh_frame, border_size, border_size, border_size, border_size, cv2.BORDER_CONSTANT, value=255)
+        contours, _ = cv2.findContours(padded_frame, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        centroids = []
+        for i,contour in enumerate(contours):
+            area = cv2.contourArea(contour)
+            if area>=int((h*0.2)*(w*0.9)):
+                pass
+            elif area<=int((h*0.2)*(w*0.05)):
+                pass
+            else:
+                M = cv2.moments(contour)
+                if M['m00'] != 0:
+                    cx = int(M['m10']/M['m00']) 
+                    cy = int(M['m01']/M['m00'])
+                    cx_shifted = cx - border_size
+                    cy_shifted = cy - border_size + int(h*0.8)
+                    centroids.append((cx_shifted, cy_shifted))
+        if len(centroids) > 0:
+            center = centroids[0][0]
+            return center
+        else:
+            return -1
+
 
     def process_image(self, data):
         '''
@@ -55,11 +83,7 @@ class Gazebo_Linefollow_Env(gazebo_env.GazeboEnv):
         except CvBridgeError as e:
             print(e)
 
-        # cv2.imshow("raw", cv_image)
-
-        NUM_BINS = 3
-        state_upper = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-        state_lower = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        state = [[0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]]
         done = False
 
         # TODO: Analyze the cv_image and compute the state array and
@@ -77,72 +101,21 @@ class Gazebo_Linefollow_Env(gazebo_env.GazeboEnv):
         #
         # You can use the self.timeout variable to keep track of which frames
         # have no line detected.
-
-        # Convert image to grayscale
-        gray = cv2.cvtColor(cv_image, cv2.COLOR_BGR2GRAY)
-
-        # Apply Gaussian blur to reduce noise
-        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-
-        # Threshold to detect dark lines (adjust threshold based on lighting)
-        _, binary = cv2.threshold(blurred, 120, 255, cv2.THRESH_BINARY_INV)
+        h, w, nc = cv_image.shape
 
 
-        upper = binary[int(binary.shape[0] /2) : int(binary.shape[0] * 3/4) , :]
-        lower = binary[int(binary.shape[0] * 3 / 4): , :]
+        upper_path_center = self.find_path_center(cv_image[int(h*0.5):int(h*0.75), :, :], h, w)
+        lower_path_center = self.find_path_center(cv_image[int(h*0.75):, :, :], h, w)
 
-        # Compute the center of the detected line
-        sum_indices = 0
-        num_pixels = 0
-        for j, row in enumerate(lower):  
-            for i, val in enumerate(row):
-                if val == 255:  # Assuming road is white in the binary image
-                    sum_indices += i
-                    num_pixels += 1
-
-        if num_pixels > 0:
-            center = sum_indices / num_pixels
-            self.last_centre_lower = center
-            rospy.loginfo("line detected lower")
-            cv2.circle(binary, (int(center), int(binary.shape[0] * 3 / 8)), 10, (0), -1)
-            state_lower[int(center/(binary.shape[1]/10))] = 1
-        else:
-            self.timeout +=1
-            if self.last_centre_lower > binary.shape[1]/2 :
-                state_lower[9] = 1
-            else:
-                state_lower[0] = 1
-
-        # Compute the center of the detected line
-        sum_indices = 0
-        num_pixels = 0
-        for j, row in enumerate(upper):  
-            for i, val in enumerate(row):
-                if val == 255:  # Assuming road is white in the binary image
-                    sum_indices += i
-                    num_pixels += 1
-
-        if num_pixels > 0:
-            center = sum_indices / num_pixels
-            self.last_centre_upper = center
-            rospy.loginfo("line detected")
-            cv2.circle(binary, (int(center), int(binary.shape[0] * 5 / 8)), 10, (0), -1)
-            state_upper[int(center/(binary.shape[1]/10))] = 1
-        else:
+        if (upper_path_center==-1) and (lower_path_center==-1):
             self.timeout += 1
-            if self.last_centre_upper > binary.shape[1]/2 :
-                state_upper[9] = 1
-            else:
-                state_upper[0] = 1
-
-        cv2.imshow("Binary Image", binary)
-        cv2.waitKey(1)
-
-        if self.timeout >= 60:
-            done = True
-
-        state = state_lower
-
+            if self.timeout > 40:
+                done = True
+        else: 
+            upper_path_idx = int((upper_path_center/w)*10)
+            lower_path_idx = int((lower_path_center/w)*10)
+            state[1][upper_path_idx] = 1
+            state[0][lower_path_idx] = 1
         return state, done
 
     def _seed(self, seed=None):
