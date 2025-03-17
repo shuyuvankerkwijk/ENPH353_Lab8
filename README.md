@@ -17,10 +17,3 @@ source enph353_gym-gazebo/gym_gazebo/envs/ros_ws/devel/setup.bash
 cd enph353_gym-gazebo/examples/gazebo_cartpole  
 python gazebo_cartpole_v0.py
 ```
-
-
-We recommend creating an alias to kill those processes.
-
-```bash
-echo "alias killgazebogym='killall -9 rosout roslaunch rosmaster gzserver nodelet robot_state_publisher gzclient'" >> ~/.bashrc
-```
